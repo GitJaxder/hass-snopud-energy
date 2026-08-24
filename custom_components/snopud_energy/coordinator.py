@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.models import (
@@ -22,11 +23,11 @@ from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
 )
-from homeassistant.util import dt as dt_util
 
 from .const import (
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
+    INTERVAL_HOURLY,
     STAT_ID_COST,
     STAT_ID_ENERGY,
 )
@@ -36,9 +37,15 @@ from .snopud_api import (
     SnoPUDAuthError,
     SnoPUDConnectionError,
     SnoPUDError,
+    parse_reading_timestamp,
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# The portal reports timestamps without a timezone. Snohomish County
+# sits in the Pacific timezone, so naive readings are interpreted
+# there regardless of the Home Assistant instance's own timezone.
+SNOPUD_TZ = ZoneInfo("America/Los_Angeles")
 
 
 class SnoPUDCoordinator(DataUpdateCoordinator[SnoPUDAccountData]):
@@ -63,12 +70,12 @@ class SnoPUDCoordinator(DataUpdateCoordinator[SnoPUDAccountData]):
     async def _async_update_data(self) -> SnoPUDAccountData:
         """Fetch data from the SnoPUD portal."""
         try:
-            data = await self.api.async_get_usage_data()
+            data = await self.api.async_get_usage_data(interval=INTERVAL_HOURLY)
         except SnoPUDAuthError as err:
             _LOGGER.debug("Auth error, attempting re-login: %s", err)
             try:
                 await self.api.async_login()
-                data = await self.api.async_get_usage_data()
+                data = await self.api.async_get_usage_data(interval=INTERVAL_HOURLY)
             except SnoPUDAuthError as auth_err:
                 raise UpdateFailed(f"Authentication failed: {auth_err}") from auth_err
         except SnoPUDConnectionError as err:
@@ -80,27 +87,30 @@ class SnoPUDCoordinator(DataUpdateCoordinator[SnoPUDAccountData]):
         return data
 
     async def _async_import_statistics(self, data: SnoPUDAccountData) -> None:
-        """Push daily readings to the recorder as long-term statistics.
+        """Push hourly readings to the recorder as long-term statistics.
 
         The Energy dashboard reads from the long-term statistics tables
-        rather than from sensor state changes. A per-day kWh value
+        rather than from sensor state changes. A per-interval kWh value
         exposed as a TOTAL sensor produces nonsense (often negative)
-        daily bars because HA computes consumption as the delta between
+        bars because HA computes consumption as the delta between
         consecutive sensor states, treating the sensor as a cumulative
         meter. Importing the readings as statistics with a monotonically
         increasing sum gives the dashboard the shape it expects and
         backfills history that would otherwise be lost between polls.
+
+        Portal timestamps are naive and interpreted as `SNOPUD_TZ`
+        (Snohomish County local time) regardless of the Home Assistant
+        instance's own timezone.
         """
         if not data.readings:
             return
 
         parsed: list[tuple[datetime, float, float]] = []
         for reading in data.readings:
-            try:
-                day = datetime.strptime(reading.read_date, "%m/%d/%Y")
-            except ValueError:
+            naive = parse_reading_timestamp(reading.read_date)
+            if naive is None:
                 continue
-            parsed.append((day, reading.kwh, reading.cost))
+            parsed.append((naive.replace(tzinfo=SNOPUD_TZ), reading.kwh, reading.cost))
         parsed.sort(key=lambda x: x[0])
 
         if not parsed:
@@ -127,21 +137,18 @@ class SnoPUDCoordinator(DataUpdateCoordinator[SnoPUDAccountData]):
         energy_stats: list[StatisticData] = []
         cost_stats: list[StatisticData] = []
 
-        for day, kwh, cost in parsed:
-            day_start = dt_util.start_of_local_day(day)
-            # The recorder dedupes on `start`, but skipping known days
+        for ts, kwh, cost in parsed:
+            # The recorder dedupes on `start`, but skipping known hours
             # also avoids re-adding their kwh to the running sum.
-            if last_energy_ts is not None and day_start.timestamp() <= last_energy_ts:
+            if last_energy_ts is not None and ts.timestamp() <= last_energy_ts:
                 continue
 
             energy_sum += kwh
             cost_sum += cost
             energy_stats.append(
-                StatisticData(start=day_start, state=energy_sum, sum=energy_sum)
+                StatisticData(start=ts, state=energy_sum, sum=energy_sum)
             )
-            cost_stats.append(
-                StatisticData(start=day_start, state=cost_sum, sum=cost_sum)
-            )
+            cost_stats.append(StatisticData(start=ts, state=cost_sum, sum=cost_sum))
 
         if not energy_stats:
             return
@@ -174,7 +181,7 @@ class SnoPUDCoordinator(DataUpdateCoordinator[SnoPUDAccountData]):
         )
 
         _LOGGER.debug(
-            "Imported %d daily stats (energy_sum=%.2f kWh, cost_sum=%.2f USD)",
+            "Imported %d hourly stats (energy_sum=%.2f kWh, cost_sum=%.2f USD)",
             len(energy_stats),
             energy_sum,
             cost_sum,

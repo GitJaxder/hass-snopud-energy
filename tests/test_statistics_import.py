@@ -106,8 +106,10 @@ def test_subsequent_import_continues_from_last_sum_and_skips_known_days():
     conftest.reset_capture()
     coord = _make_coordinator()
 
-    # Simulate a prior import that already covered May 1-3.
-    last_day = datetime(2026, 5, 3, tzinfo=timezone.utc)
+    # Simulate a prior import that already covered May 1-3. Date-only
+    # readings are interpreted as midnight America/Los_Angeles, which
+    # is UTC-7 (PDT) in May, i.e. 07:00 UTC.
+    last_day = datetime(2026, 5, 3, 7, tzinfo=timezone.utc)
     conftest.last_statistics_state[STAT_ID_ENERGY] = [
         {"start": last_day.timestamp(), "sum": 30.0}
     ]
@@ -159,3 +161,99 @@ def test_cost_unit_uses_configured_currency():
 
     cost_meta = conftest.imported_metadata[1]
     assert cost_meta.unit_of_measurement == "EUR"
+
+
+def test_hourly_readings_produce_distinct_statistics_per_hour():
+    """Same-day hourly readings must not collapse onto a single point."""
+    conftest.reset_capture()
+    coord = _make_coordinator()
+
+    # Intentionally scrambled to confirm hour-level (not just day-level)
+    # chronological sorting.
+    _run(
+        coord,
+        _data(
+            ("05/01/2026 02:00:00", 0.9, 0.14),
+            ("05/01/2026 00:00:00", 1.0, 0.15),
+            ("05/01/2026 01:00:00", 1.2, 0.18),
+        ),
+    )
+
+    energy_pts = conftest.imported_data[0]
+    assert len(energy_pts) == 3
+    assert [p.start.hour for p in energy_pts] == [0, 1, 2]
+    assert [round(p.sum, 2) for p in energy_pts] == [1.0, 2.2, 3.1]
+
+
+def test_hourly_dedup_against_last_imported_hour():
+    """The next poll must skip already-imported hours, not just days."""
+    conftest.reset_capture()
+    coord = _make_coordinator()
+
+    # "05/01/2026 01:00:00" is interpreted as America/Los_Angeles, which
+    # is UTC-7 (PDT) in May, i.e. 08:00 UTC.
+    last_hour = datetime(2026, 5, 1, 8, tzinfo=timezone.utc)
+    conftest.last_statistics_state[STAT_ID_ENERGY] = [
+        {"start": last_hour.timestamp(), "sum": 2.2}
+    ]
+    conftest.last_statistics_state[STAT_ID_COST] = [
+        {"start": last_hour.timestamp(), "sum": 0.33}
+    ]
+
+    _run(
+        coord,
+        _data(
+            ("05/01/2026 00:00:00", 1.0, 0.15),
+            ("05/01/2026 01:00:00", 1.2, 0.18),
+            ("05/01/2026 02:00:00", 0.9, 0.14),
+        ),
+    )
+
+    energy_pts = conftest.imported_data[0]
+    # Only the 02:00 reading is newer than last_hour (01:00 UTC).
+    assert len(energy_pts) == 1
+    assert round(energy_pts[0].sum, 2) == 3.1
+
+
+def test_malformed_hourly_timestamp_is_skipped():
+    """A reading with an unparseable timestamp is dropped, not fatal."""
+    conftest.reset_capture()
+    coord = _make_coordinator()
+
+    _run(
+        coord,
+        _data(
+            ("05/01/2026 00:00:00", 1.0, 0.15),
+            ("not-a-timestamp", 5.0, 0.75),
+            ("05/01/2026 01:00:00", 1.2, 0.18),
+        ),
+    )
+
+    energy_pts = conftest.imported_data[0]
+    assert len(energy_pts) == 2
+    assert [round(p.sum, 2) for p in energy_pts] == [1.0, 2.2]
+
+
+def test_dst_spring_forward_hour_gap_does_not_break_sequencing():
+    """The skipped wall-clock hour at a DST transition must not double-count.
+
+    On 2026-03-08, America/Los_Angeles springs forward from 01:59 PST
+    directly to 03:00 PDT — the 02:00 hour never occurs locally. Readings
+    bracketing the gap are only one real hour apart, not two.
+    """
+    conftest.reset_capture()
+    coord = _make_coordinator()
+
+    _run(
+        coord,
+        _data(
+            ("03/08/2026 01:00:00", 1.0, 0.15),
+            ("03/08/2026 03:00:00", 1.0, 0.15),
+        ),
+    )
+
+    energy_pts = conftest.imported_data[0]
+    assert len(energy_pts) == 2
+    starts = [p.start for p in energy_pts]
+    assert starts == sorted(starts)
+    assert starts[1].timestamp() - starts[0].timestamp() == 3600

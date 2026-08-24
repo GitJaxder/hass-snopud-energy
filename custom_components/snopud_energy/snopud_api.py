@@ -17,11 +17,40 @@ from .const import (
     DOWNLOAD_SETTINGS_URL,
     DOWNLOAD_URL,
     FORMAT_CSV,
-    INTERVAL_DAILY,
+    INTERVAL_HOURLY,
     LOGIN_PAGE_URL,
     LOGIN_URL,
     SERVICE_TYPE_ELECTRIC,
 )
+
+# Canonical string format readings are normalized to before storage/sort.
+# Always includes the hour so hourly-interval data isn't collapsed onto
+# a single per-day bucket.
+READING_TIMESTAMP_FORMAT = "%m/%d/%Y %H:%M:%S"
+
+# Formats the portal is known to return, tried in order. Date-only forms
+# are a compatibility fallback for daily/billing intervals.
+_PORTAL_TIMESTAMP_FORMATS = (
+    "%m/%d/%Y %I:%M:%S %p",
+    READING_TIMESTAMP_FORMAT,
+    "%m/%d/%Y",
+)
+
+
+def parse_reading_timestamp(read_date: str) -> datetime | None:
+    """Parse a normalized reading timestamp string.
+
+    Accepts the canonical ``READING_TIMESTAMP_FORMAT`` as well as a
+    bare date, so callers can still handle data written before hourly
+    imports existed.
+    """
+    for fmt in (READING_TIMESTAMP_FORMAT, "%m/%d/%Y"):
+        try:
+            return datetime.strptime(read_date, fmt)
+        except ValueError:
+            continue
+    return None
+
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,6 +78,7 @@ class SnoPUDMeterReading:
     """A single meter reading from the portal."""
 
     read_date: str
+    """Timestamp in ``READING_TIMESTAMP_FORMAT`` (MM/DD/YYYY HH:MM:SS)."""
     kwh: float
     cost: float
     meter_number: str = ""
@@ -326,7 +356,7 @@ class SnoPUDApiClient:
 
     async def async_get_usage_data(
         self,
-        interval: str = INTERVAL_DAILY,
+        interval: str = INTERVAL_HOURLY,
         days_back: int = 60,
     ) -> SnoPUDAccountData:
         """Fetch usage data from the portal.
@@ -714,21 +744,25 @@ class SnoPUDApiClient:
 
     @staticmethod
     def _parse_date(date_str: str) -> str:
-        """Normalise a date string to MM/DD/YYYY.
+        """Normalise a portal timestamp to the canonical reading format.
 
-        The portal returns dates in several formats depending on
+        The portal returns timestamps in several formats depending on
         the selected interval:
+          - "03/17/2026 01:00:00 AM" (hourly)
           - "03/17/2026 12:00:00 AM" (billing)
-          - "03/17/2026"             (daily)
+          - "03/17/2026"             (daily, no time component)
+
+        The hour is preserved (defaulting to midnight for date-only
+        input) so hourly-interval readings don't collapse onto a
+        single per-day bucket.
         """
         date_str = date_str.strip().strip('"')
         if not date_str:
             return ""
-        # Try datetime with time component first
-        for fmt in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y"):
+        for fmt in _PORTAL_TIMESTAMP_FORMATS:
             try:
                 dt = datetime.strptime(date_str, fmt)
-                return dt.strftime("%m/%d/%Y")
+                return dt.strftime(READING_TIMESTAMP_FORMAT)
             except ValueError:
                 continue
         return date_str
@@ -779,10 +813,7 @@ class SnoPUDApiClient:
             # Sort ascending so latest_* truly reflects the newest reading
             # and downstream consumers can rely on chronological order.
             def _sort_key(r: SnoPUDMeterReading) -> datetime:
-                try:
-                    return datetime.strptime(r.read_date, "%m/%d/%Y")
-                except ValueError:
-                    return datetime.min
+                return parse_reading_timestamp(r.read_date) or datetime.min
 
             account_data.readings.sort(key=_sort_key)
 
@@ -794,13 +825,12 @@ class SnoPUDApiClient:
             # Sum current month
             now = datetime.now()
             for reading in account_data.readings:
-                try:
-                    rd = datetime.strptime(reading.read_date, "%m/%d/%Y")
-                    if rd.year == now.year and rd.month == now.month:
-                        account_data.total_kwh_current_month += reading.kwh
-                        account_data.total_cost_current_month += reading.cost
-                except ValueError:
+                rd = parse_reading_timestamp(reading.read_date)
+                if rd is None:
                     continue
+                if rd.year == now.year and rd.month == now.month:
+                    account_data.total_kwh_current_month += reading.kwh
+                    account_data.total_cost_current_month += reading.cost
 
         _LOGGER.debug("Parsed %d readings from SnoPUD CSV", len(account_data.readings))
         return account_data

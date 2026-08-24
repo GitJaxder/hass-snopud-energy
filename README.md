@@ -9,7 +9,7 @@ This integration scrapes your usage data from the [MySnoPUD](https://my.snopud.c
 ## Features
 
 - Automatic login and session management with the MySnoPUD portal
-- Daily energy usage (kWh) and cost ($) sensors
+- Hourly energy usage (kWh) and cost ($) sensors
 - Current month aggregated energy and cost
 - Compatible with the Home Assistant Energy dashboard
 - UI-based configuration (no YAML editing required)
@@ -19,11 +19,11 @@ This integration scrapes your usage data from the [MySnoPUD](https://my.snopud.c
 
 | Sensor | Description | Unit |
 |--------|-------------|------|
-| Latest Daily Energy | kWh from the most recent daily reading | kWh |
-| Latest Daily Cost | Cost from the most recent daily reading | USD |
+| Latest Daily Energy | kWh from the most recent hourly reading | kWh |
+| Latest Daily Cost | Cost from the most recent hourly reading | USD |
 | Current Month Energy | Aggregated kWh for the current calendar month | kWh |
 | Current Month Cost | Aggregated cost for the current calendar month | USD |
-| Last Read Date | Date of the most recent meter reading | — |
+| Last Read Date | Timestamp of the most recent meter reading | — |
 
 ## Installation
 
@@ -54,9 +54,9 @@ After setup, go to **Settings** > **Dashboards** > **Energy** and add the integr
 - **Grid consumption** → select `Snohomish County PUD Energy Consumption` (statistic ID `snopud_energy:energy_consumption`)
 - **Use an entity tracking the total costs** → select `Snohomish County PUD Energy Cost` (statistic ID `snopud_energy:energy_cost`)
 
-The integration imports up to 60 days of daily history into the recorder's long-term statistics tables on each refresh, so the dashboard shows correct per-day bars and the standard month/year aggregations work as expected.
+The integration imports up to 60 days of hourly history into the recorder's long-term statistics tables on each refresh, so the dashboard shows correct per-hour bars and the standard day/month/year aggregations work as expected. Portal timestamps are interpreted as Snohomish County local time (`America/Los_Angeles`), regardless of your Home Assistant instance's own timezone.
 
-> **Do not** select the live `Latest Daily Energy` sensor as your grid consumption source. It exposes a single day's kWh, not a cumulative meter reading, so the Energy dashboard would compute the delta between consecutive states and produce nonsense (often negative) values. The live sensors are for at-a-glance display only.
+> **Do not** select the live `Latest Daily Energy` sensor as your grid consumption source. It exposes a single hour's kWh, not a cumulative meter reading, so the Energy dashboard would compute the delta between consecutive states and produce nonsense (often negative) values. The live sensors are for at-a-glance display only.
 
 > **Currency note:** the cost statistic is written using your Home Assistant currency setting (**Settings** > **System** > **General**) at the time of each refresh. If you're a US-based user, set this to `USD ($)` *before* installing the integration so the cost stat is created in the right currency. Changing the HA currency later will only affect rows imported after the change — existing rows keep the unit they were written with.
 
