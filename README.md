@@ -51,8 +51,8 @@ This integration scrapes your usage data from the [MySnoPUD](https://my.snopud.c
 
 After setup, go to **Settings** > **Dashboards** > **Energy** and add the integration's long-term statistics:
 
-- **Grid consumption** → select `Snohomish County PUD Energy Consumption` (statistic ID `snopud_energy:energy_consumption`)
-- **Use an entity tracking the total costs** → select `Snohomish County PUD Energy Cost` (statistic ID `snopud_energy:energy_cost`)
+- **Grid consumption** → select `Snohomish County PUD Energy Consumption` (statistic ID `snopud_energy:energy_consumption_hourly`)
+- **Use an entity tracking the total costs** → select `Snohomish County PUD Energy Cost` (statistic ID `snopud_energy:energy_cost_hourly`)
 
 The integration imports up to 60 days of hourly history into the recorder's long-term statistics tables on each refresh, so the dashboard shows correct per-hour bars and the standard day/month/year aggregations work as expected. Portal timestamps are interpreted as Snohomish County local time (`America/Los_Angeles`), regardless of your Home Assistant instance's own timezone.
 
@@ -62,7 +62,7 @@ The integration imports up to 60 days of hourly history into the recorder's long
 
 ### Migrating from a previous install
 
-If you previously added the `Latest Daily Energy` sensor as your grid source, switch to the `snopud_energy:energy_consumption` statistic above. The old sensor-based history can be cleared from **Developer Tools** > **Statistics** if you'd like to remove the bad data points.
+If you previously added the `Latest Daily Energy` sensor or the old `snopud_energy:energy_consumption` statistic as your grid source, switch to the `snopud_energy:energy_consumption_hourly` statistic above. The old sensor-based or daily statistic history can be cleared from **Developer Tools** > **Statistics** if you'd like to remove the old data points.
 
 ## How It Works
 

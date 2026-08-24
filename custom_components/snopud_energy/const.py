@@ -17,8 +17,8 @@ DEFAULT_SCAN_INTERVAL_HOURS = 12
 # prefix marks them as integration-owned ("external") statistics so
 # they show up in the Grid consumption / cost pickers without needing
 # a backing entity.
-STAT_ID_ENERGY = f"{DOMAIN}:energy_consumption"
-STAT_ID_COST = f"{DOMAIN}:energy_cost"
+STAT_ID_ENERGY = f"{DOMAIN}:energy_consumption_hourly"
+STAT_ID_COST = f"{DOMAIN}:energy_cost_hourly"
 
 # Download form field values
 FORMAT_CSV = "2"

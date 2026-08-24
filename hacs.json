@@ -1,5 +1,5 @@
 {
-  "name": "Snohomish County PUD (SnoPUD) Energy",
+  "name": "Snohomish County PUD (SnoPUD) Energy - branch_hourly",
   "render_readme": true,
   "homeassistant": "2024.1.0"
 }
