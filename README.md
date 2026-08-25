@@ -1,6 +1,15 @@
-# hass-snopud-energy
+# hass-snopud-energy - Hourly Statistics
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
+
+This is a fork from [frozenfoxx/hass-snopud-energy](https://github.com/frozenfoxx/hass-snopud-energy) that pulls an hourly CSV, rather than a daily CSV. To be clear, this does not make live updates magically occur; SnoPUD still publishes data on whatever schedule the org chooses, this just pulls in more detailed data down to the hour to make the energy usage bars line up better in the Energy dashboard.
+
+I used Claude Code to modify the original branch.
+
+All credit goes to [frozenfoxx](https://github.com/frozenfoxx/) for this awesome integration.
+
+Below is their original readme:
+----------------------------------------------------------
 
 A Home Assistant custom integration for [Snohomish County PUD](https://www.snopud.com/) (SnoPUD) energy usage data.
 
