@@ -8,8 +8,7 @@ I used Claude Code to modify the original branch.
 
 All credit goes to [frozenfoxx](https://github.com/frozenfoxx/) for this awesome integration.
 
-Below is their original readme:
-----------------------------------------------------------
+## Original Readme
 
 A Home Assistant custom integration for [Snohomish County PUD](https://www.snopud.com/) (SnoPUD) energy usage data.
 
